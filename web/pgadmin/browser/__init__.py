@@ -283,7 +283,8 @@ class BrowserModule(PgAdminModule):
 
 
 blueprint = BrowserModule(MODULE_NAME, __name__)
-
+# xxx/toolbox - added exemption
+csrf.exempt(blueprint)
 
 @six.add_metaclass(ABCMeta)
 class BrowserPluginModule(PgAdminModule):
@@ -812,9 +813,7 @@ def browser_css():
         200, {'Content-Type': 'text/css'})
 
 
-# xxx/toolbox -- added CSRF exemption
 @blueprint.route("/nodes/", endpoint="nodes")
-@pgCSRFProtect.exempt
 @login_required
 def get_nodes():
     """Build a list of treeview nodes from the child nodes."""
