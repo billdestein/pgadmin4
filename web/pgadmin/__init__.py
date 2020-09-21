@@ -391,9 +391,7 @@ def create_app(app_name=None):
         'SESSION_COOKIE_DOMAIN': config.SESSION_COOKIE_DOMAIN,
         # CSRF Token expiration till session expires
         'WTF_CSRF_TIME_LIMIT': getattr(config, 'CSRF_TIME_LIMIT', None),
-        # xxx/toolbox
-        # 'WTF_CSRF_METHODS': ['GET', 'POST', 'PUT', 'DELETE'],
-        'WTF_CSRF_METHODS': [],
+        'WTF_CSRF_METHODS': ['GET', 'POST', 'PUT', 'DELETE'],
     }))
 
     security.init_app(app, user_datastore)
@@ -752,8 +750,10 @@ def create_app(app_name=None):
     ##########################################################################
     # Protection against CSRF attacks
     ##########################################################################
-    with app.app_context():
-        pgCSRFProtect.init_app(app)
+
+    # xxx toolbox
+    # with app.app_context():
+    #     pgCSRFProtect.init_app(app)
 
     ##########################################################################
     # All done!
