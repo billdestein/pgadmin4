@@ -812,7 +812,9 @@ def browser_css():
         200, {'Content-Type': 'text/css'})
 
 
+# xxx/toolbox -- added CSRF exemption
 @blueprint.route("/nodes/", endpoint="nodes")
+@pgCSRFProtect.exempt
 @login_required
 def get_nodes():
     """Build a list of treeview nodes from the child nodes."""

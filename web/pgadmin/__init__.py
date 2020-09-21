@@ -751,9 +751,8 @@ def create_app(app_name=None):
     # Protection against CSRF attacks
     ##########################################################################
 
-    # xxx toolbox
-    # with app.app_context():
-    #     pgCSRFProtect.init_app(app)
+    with app.app_context():
+        pgCSRFProtect.init_app(app)
 
     ##########################################################################
     # All done!
