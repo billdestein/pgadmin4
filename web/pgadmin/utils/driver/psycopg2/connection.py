@@ -13,6 +13,8 @@ It is a wrapper around the actual psycopg2 driver, and connection
 object.
 """
 
+import os # xxx/toolbox -- added this
+
 import random
 import select
 import datetime
@@ -432,23 +434,24 @@ class Connection(BaseConnection):
         # PostgreSQL 'cos we're nice like that.
 
         # xxx toolbox -- Redshift does not support 'client_min_messages'
-        status = self._execute(
-            cur,
-            "SET DateStyle=ISO; "
-            "SELECT set_config('bytea_output','hex',false) FROM pg_settings"
-            " WHERE name = 'bytea_output'; "
-            "SET client_encoding='{0}';".format(postgres_encoding)
-        )
-        
-        # status = self._execute(
-        #     cur,
-        #     "SET DateStyle=ISO; "
-        #     "SET client_min_messages=notice; "
-        #     "SELECT set_config('bytea_output','hex',false) FROM pg_settings"
-        #     " WHERE name = 'bytea_output'; "
-        #     "SET client_encoding='{0}';".format(postgres_encoding)
-        # )
-
+        if os.environ['TOOLBOX_VARIANT'] == 'postgresql':
+            status = self._execute(
+                cur,
+                "SET DateStyle=ISO; "
+                "SET client_min_messages=notice; "
+                "SELECT set_config('bytea_output','hex',false) FROM pg_settings"
+                " WHERE name = 'bytea_output'; "
+                "SET client_encoding='{0}';".format(postgres_encoding)
+            )
+        else:
+            status = self._execute(
+                cur,
+                "SET DateStyle=ISO; "
+                "SELECT set_config('bytea_output','hex',false) FROM pg_settings"
+                " WHERE name = 'bytea_output'; "
+                "SET client_encoding='{0}';".format(postgres_encoding)
+            )
+    
         if status is not None:
             self.conn.close()
             self.conn = None
