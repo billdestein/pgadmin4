@@ -283,8 +283,6 @@ class BrowserModule(PgAdminModule):
 
 
 blueprint = BrowserModule(MODULE_NAME, __name__)
-# xxx/toolbox - added exemption
-csrf.exempt(blueprint)
 
 @six.add_metaclass(ABCMeta)
 class BrowserPluginModule(PgAdminModule):
