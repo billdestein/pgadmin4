@@ -430,14 +430,24 @@ class Connection(BaseConnection):
         # Note that we use 'UPDATE pg_settings' for setting bytea_output as a
         # convenience hack for those running on old, unsupported versions of
         # PostgreSQL 'cos we're nice like that.
+
+        # xxx toolbox -- Redshift does not support 'client_min_messages'
         status = self._execute(
             cur,
             "SET DateStyle=ISO; "
-            "SET client_min_messages=notice; "
             "SELECT set_config('bytea_output','hex',false) FROM pg_settings"
             " WHERE name = 'bytea_output'; "
             "SET client_encoding='{0}';".format(postgres_encoding)
         )
+        
+        # status = self._execute(
+        #     cur,
+        #     "SET DateStyle=ISO; "
+        #     "SET client_min_messages=notice; "
+        #     "SELECT set_config('bytea_output','hex',false) FROM pg_settings"
+        #     " WHERE name = 'bytea_output'; "
+        #     "SET client_encoding='{0}';".format(postgres_encoding)
+        # )
 
         if status is not None:
             self.conn.close()
