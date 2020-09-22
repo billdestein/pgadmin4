@@ -1134,6 +1134,10 @@ class ServerNode(PGChildNodeView):
 
                     user = manager.user_info
                     connected = True
+                    
+                    current_app.logger.info(
+                        'user: {0}'.format(user)
+                    )
 
             return jsonify(
                 node=self.blueprint.generate_browser_node(
