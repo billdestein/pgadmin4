@@ -1134,8 +1134,9 @@ class ServerNode(PGChildNodeView):
 
                     user = manager.user_info
                     connected = True
-                    
-                    current_app.logger.info(
+
+                    # xxx/toolbox
+                    current_app.logger.warning(
                         'user: {0}'.format(user)
                     )
 
