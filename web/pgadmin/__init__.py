@@ -750,7 +750,6 @@ def create_app(app_name=None):
     ##########################################################################
     # Protection against CSRF attacks
     ##########################################################################
-
     with app.app_context():
         pgCSRFProtect.init_app(app)
 
