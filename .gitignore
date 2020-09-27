@@ -52,3 +52,5 @@ auditpy.txt
 /venv/
 .scannerwork/
 web/coverage/
+
+main
