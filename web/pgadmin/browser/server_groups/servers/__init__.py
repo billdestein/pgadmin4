@@ -139,13 +139,16 @@ class ServerModule(sg.ServerGroupPluginModule):
         Return shared server properties
         :param server:
         :param sharedserver:
-        :return:
+        :return: shared server
         """
-
         server.bgcolor = sharedserver.bgcolor
         server.fgcolor = sharedserver.fgcolor
         server.name = sharedserver.name
         server.role = sharedserver.role
+        server.use_ssh_tunnel = sharedserver.use_ssh_tunnel
+        server.tunnel_host = sharedserver.tunnel_host
+        server.tunnel_port = sharedserver.tunnel_port
+        server.tunnel_authentication = sharedserver.tunnel_authentication
         server.tunnel_username = sharedserver.tunnel_username
         server.tunnel_password = sharedserver.tunnel_password
         server.save_password = sharedserver.save_password
@@ -157,53 +160,53 @@ class ServerModule(sg.ServerGroupPluginModule):
 
         return server
 
-    @staticmethod
-    def check_to_hide_shared_server(hide_shared_server, shared_server,
-                                    auto_detected_server):
+    def get_servers(self, all_servers, hide_shared_server, gid):
+        """
+        This function creates list of servers which needs to display
+        in browser tree
+        :param all_servers:
+        :param hide_shared_server:
+        :param gid:
+        :return: list of servers
+        """
+        servers = []
+        for server in all_servers:
+            if server.discovery_id and \
+                not server.shared and \
+                config.SERVER_MODE and \
+                len(SharedServer.query.filter_by(
+                    user_id=current_user.id,
+                    name=server.name).all()) > 0 and not hide_shared_server:
+                continue
 
-        hide_server = False
-        if hide_shared_server or \
-                shared_server.name == auto_detected_server:
-            hide_server = True
+            if server.shared and server.user_id != current_user.id:
 
-        return hide_server
+                shared_server = self.get_shared_server(server, gid)
+
+                if hide_shared_server:
+                    # Don't include shared server if hide shared server is
+                    # set to true.
+                    continue
+
+                server = self.get_shared_server_properties(server,
+                                                           shared_server)
+            servers.append(server)
+
+        return servers
 
     @login_required
     def get_nodes(self, gid):
         """Return a JSON document listing the server groups for the user"""
 
         hide_shared_server = get_preferences()
-
         servers = Server.query.filter(
             or_(Server.user_id == current_user.id, Server.shared),
             Server.servergroup_id == gid)
 
         driver = get_driver(PG_DEFAULT_DRIVER)
+        servers = self.get_servers(servers, hide_shared_server, gid)
 
         for server in servers:
-
-            if server.shared and server.user_id != current_user.id:
-
-                shared_server, auto_detected_server = \
-                    self.get_shared_server(server, gid)
-
-                if self.check_to_hide_shared_server(hide_shared_server,
-                                                    shared_server,
-                                                    auto_detected_server):
-                    # Don't include shared server if hide shared server is
-                    # set to true
-                    continue
-
-                # if hide_shared_server or \
-                #         shared_server.name == auto_detected_server:
-                #     # Don't include shared server if hide shared server is
-                #     # set to true
-                #     continue
-
-                # if shared_server.name == auto_detected_server:
-                #     continue
-                server = self.get_shared_server_properties(server,
-                                                           shared_server)
             connected = False
             manager = None
             errmsg = None
@@ -331,6 +334,7 @@ class ServerModule(sg.ServerGroupPluginModule):
 
         shared_server = None
         try:
+            db.session.rollback()
             user = User.query.filter_by(id=data.user_id).first()
             shared_server = SharedServer(
                 user_id=current_user.id,
@@ -354,13 +358,13 @@ class ServerModule(sg.ServerGroupPluginModule):
                 fgcolor=data.fgcolor if data.fgcolor else None,
                 service=data.service if data.service else None,
                 connect_timeout=0,
-                use_ssh_tunnel=0,
-                tunnel_host=None,
+                use_ssh_tunnel=data.use_ssh_tunnel,
+                tunnel_host=data.tunnel_host,
                 tunnel_port=22,
                 tunnel_username=None,
                 tunnel_authentication=0,
                 tunnel_identity_file=None,
-                shared=data.shared if data.shared else None
+                shared=True
             )
             db.session.add(shared_server)
             db.session.commit()
@@ -380,12 +384,9 @@ class ServerModule(sg.ServerGroupPluginModule):
         :param gid:
         :return: shared_server
         """
-        auto_detected_server = None
         shared_server = SharedServer.query.filter_by(
             name=server.name, user_id=current_user.id,
             servergroup_id=gid).first()
-        if server.discovery_id:
-            auto_detected_server = server.name
 
         if shared_server is None:
             ServerModule.create_shared_server(server, gid)
@@ -394,7 +395,7 @@ class ServerModule(sg.ServerGroupPluginModule):
                 name=server.name, user_id=current_user.id,
                 servergroup_id=gid).first()
 
-        return shared_server, auto_detected_server
+        return shared_server
 
 
 class ServerMenuItem(MenuItem):
@@ -502,8 +503,7 @@ class ServerNode(PGChildNodeView):
 
         for server in servers:
             if server.shared and server.user_id != current_user.id:
-                shared_server, auto_detected_server = \
-                    ServerModule.get_shared_server(server, gid)
+                shared_server = ServerModule.get_shared_server(server, gid)
                 server = \
                     ServerModule.get_shared_server_properties(server,
                                                               shared_server)
@@ -560,8 +560,7 @@ class ServerNode(PGChildNodeView):
         server = Server.query.filter_by(id=sid).first()
 
         if server.shared and server.user_id != current_user.id:
-            shared_server, auto_detected_server = \
-                ServerModule.get_shared_server(server, gid)
+            shared_server = ServerModule.get_shared_server(server, gid)
             server = ServerModule.get_shared_server_properties(server,
                                                                shared_server)
 
@@ -685,8 +684,7 @@ class ServerNode(PGChildNodeView):
 
         if config.SERVER_MODE and server.shared and \
                 server.user_id != current_user.id:
-            sharedserver, auto_detected_server = \
-                ServerModule.get_shared_server(server, gid)
+            sharedserver = ServerModule.get_shared_server(server, gid)
 
         # Not all parameters can be modified, while the server is connected
         config_param_map = {
@@ -789,6 +787,8 @@ class ServerNode(PGChildNodeView):
                 True,
                 self.node_type,
                 connected=connected,
+                shared=server.shared,
+                user_id=server.user_id,
                 user=manager.user_info if connected else None,
                 server_type='pg'  # default server type
             )
@@ -857,8 +857,7 @@ class ServerNode(PGChildNodeView):
 
         for server in servers:
             if server.shared and server.user_id != current_user.id:
-                shared_server, auto_detected_server = \
-                    ServerModule.get_shared_server(server, gid)
+                shared_server = ServerModule.get_shared_server(server, gid)
                 server = \
                     ServerModule.get_shared_server_properties(server,
                                                               shared_server)
@@ -915,10 +914,8 @@ class ServerNode(PGChildNodeView):
         conn = manager.connection()
         connected = conn.connected()
 
-        # if server.shared and not current_user.has_role("Administrator"):
         if server.shared and server.user_id != current_user.id:
-            shared_server, auto_detected_server = \
-                ServerModule.get_shared_server(server, gid)
+            shared_server = ServerModule.get_shared_server(server, gid)
             server = ServerModule.get_shared_server_properties(server,
                                                                shared_server)
             server_owner = server.server_owner
@@ -1144,6 +1141,7 @@ class ServerNode(PGChildNodeView):
                     self.node_type,
                     user=user,
                     connected=connected,
+                    shared=server.shared,
                     server_type=manager.server_type
                     if manager and manager.server_type
                     else 'pg',
@@ -1249,7 +1247,7 @@ class ServerNode(PGChildNodeView):
             }
         )
 
-    def connect(self, gid, sid):
+    def connect(self, gid, sid, user_name=None):
         """
         Connect the Server and return the connection object.
         Verification Process before Connection:
@@ -1273,15 +1271,15 @@ class ServerNode(PGChildNodeView):
         server = Server.query.filter_by(id=sid).first()
         shared_server = None
         if server.shared and server.user_id != current_user.id:
-            shared_server, auto_detected_server = \
-                ServerModule.get_shared_server(server, gid)
+            shared_server = ServerModule.get_shared_server(server, gid)
             server = ServerModule.get_shared_server_properties(server,
                                                                shared_server)
         if server is None:
             return bad_request(self.not_found_error_msg())
 
-        # Return if username is blank
-        if server.username is None:
+        # Return if username is blank and the server is shared
+        if server.username is None and not server.service and \
+                server.shared:
             return make_json_response(
                 status=200,
                 success=0,
@@ -1312,7 +1310,8 @@ class ServerNode(PGChildNodeView):
 
         # Connect the Server
         manager = get_driver(PG_DEFAULT_DRIVER).connection_manager(sid)
-        manager.update(server)
+        if not manager.connection().connected():
+            manager.update(server)
         conn = manager.connection()
 
         # Get enc key
@@ -1370,7 +1369,8 @@ class ServerNode(PGChildNodeView):
         # not provided, or password has not been saved earlier.
         if prompt_password or prompt_tunnel_password:
             return self.get_response_for_password(server, 428, prompt_password,
-                                                  prompt_tunnel_password)
+                                                  prompt_tunnel_password,
+                                                  user=user_name)
 
         status = True
         try:
@@ -1804,7 +1804,8 @@ class ServerNode(PGChildNodeView):
             return internal_server_error(errormsg=str(e))
 
     def get_response_for_password(self, server, status, prompt_password=False,
-                                  prompt_tunnel_password=False, errmsg=None):
+                                  prompt_tunnel_password=False, errmsg=None,
+                                  user=None):
 
         if server.use_ssh_tunnel:
             return make_json_response(
@@ -1819,6 +1820,7 @@ class ServerNode(PGChildNodeView):
                     tunnel_identity_file=server.tunnel_identity_file,
                     errmsg=errmsg,
                     _=gettext,
+                    service=server.service,
                     prompt_tunnel_password=prompt_tunnel_password,
                     prompt_password=prompt_password
                 )
@@ -1830,8 +1832,9 @@ class ServerNode(PGChildNodeView):
                 result=render_template(
                     'servers/password.html',
                     server_label=server.name,
-                    username=server.username,
+                    username=user if user else server.username,
                     errmsg=errmsg,
+                    service=server.service,
                     _=gettext,
                 )
             )

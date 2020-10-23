@@ -14,6 +14,7 @@ define('tools.querytool', [
   'jqueryui.position', 'underscore', 'pgadmin.alertifyjs',
   'sources/pgadmin', 'backbone', 'bundled_codemirror', 'sources/utils',
   'pgadmin.misc.explain',
+  'pgadmin.user_management.current_user',
   'sources/selection/grid_selector',
   'sources/selection/active_cell_capture',
   'sources/selection/clipboard',
@@ -26,6 +27,7 @@ define('tools.querytool', [
   'sources/sqleditor/execute_query',
   'sources/sqleditor/query_tool_http_error_handler',
   'sources/sqleditor/filter_dialog',
+  'sources/sqleditor/new_connection_dialog',
   'sources/sqleditor/geometry_viewer',
   'sources/sqleditor/history/history_collection.js',
   'sources/sqleditor/history/query_history',
@@ -43,6 +45,7 @@ define('tools.querytool', [
   'tools/datagrid/static/js/datagrid_panel_title',
   'sources/window',
   'sources/is_native',
+  'sources/sqleditor/macro',
   'sources/../bundle/slickgrid',
   'pgadmin.file_manager',
   'slick.pgadmin.formatters',
@@ -52,12 +55,12 @@ define('tools.querytool', [
   'pgadmin.tools.user_management',
 ], function(
   gettext, url_for, $, jqueryui, jqueryui_position, _, alertify, pgAdmin, Backbone, codemirror, pgadminUtils,
-  pgExplain, GridSelector, ActiveCellCapture, clipboard, copyData, RangeSelectionHelper, handleQueryOutputKeyboardEvent,
-  XCellSelectionModel, setStagedRows, SqlEditorUtils, ExecuteQuery, httpErrorHandler, FilterHandler,
+  pgExplain, current_user, GridSelector, ActiveCellCapture, clipboard, copyData, RangeSelectionHelper, handleQueryOutputKeyboardEvent,
+  XCellSelectionModel, setStagedRows, SqlEditorUtils, ExecuteQuery, httpErrorHandler, FilterHandler, newConnectionHandler,
   GeometryViewer, historyColl, queryHist, querySources,
   keyboardShortcuts, queryToolActions, queryToolNotifications, Datagrid,
   modifyAnimation, calculateQueryRunTime, callRenderAfterPoll, queryToolPref, queryTxnStatus, csrfToken, panelTitleFunc,
-  pgWindow, isNative) {
+  pgWindow, isNative, MacroHandler) {
   /* Return back, this has been called more than once */
   if (pgAdmin.SqlEditor)
     return pgAdmin.SqlEditor;
@@ -76,6 +79,14 @@ define('tools.querytool', [
 
   var is_query_running = false;
 
+  const EMPTY_DATA_OUTPUT_CONTENT = '<div role="status" class="pg-panel-message">' +
+    gettext('No data output. Execute a query to get output.') +
+  '</div>';
+
+  const EMPTY_EXPLAIN_CONTENT = '<div role="status" class="pg-panel-message">' +
+    gettext('Use Explain/Explain analyze button to generate the plan for a query. Alternatively, you can also execute "EXPLAIN (FORMAT JSON) [QUERY]".') +
+  '</div>';
+
   // Defining Backbone view for the sql grid.
   var SQLEditorView = Backbone.View.extend({
     initialize: function(opts) {
@@ -89,6 +100,9 @@ define('tools.querytool', [
       this.layout = opts.layout;
       this.set_server_version(opts.server_ver);
       this.trigger('pgadmin-sqleditor:view:initialised');
+      this.connection_list = [
+        {'server_group': null,'server': null, 'database': null, 'user': null, 'role': null, 'title': '&lt;New Connection&gt;'},
+      ];
     },
 
     // Bind all the events
@@ -149,6 +163,43 @@ define('tools.querytool', [
       // Transaction control
       'click #btn-commit': 'on_commit_transaction',
       'click #btn-rollback': 'on_rollback_transaction',
+      // Manage Macros
+      'click #btn-manage-macros': 'on_manage_macros',
+      'click .btn-macro': 'on_execute_macro',
+    },
+
+    render_connection: function(data_list) {
+      if(this.handler.is_query_tool) {
+        var dropdownElement = document.getElementById('connections-list');
+        dropdownElement.innerHTML = '';
+        data_list.forEach((option, index) => {
+          var opt = '';
+          if ('is_selected' in option && option['is_selected']) {
+            opt = '<li class="connection-list-item selected-connection" data-index='+ index +'><a class="dropdown-item" href="#" tabindex="0">'+ option.title +'</a></li>';
+          } else {
+            opt = '<li class="connection-list-item" data-index='+ index +'><a class="dropdown-item" href="#" tabindex="0">'+ option.title +'</a></li>';
+          }
+          $('#connections-list').append(opt);
+        });
+        var self = this;
+        $('.connection-list-item').click(function() {
+          self.get_connection_data(this);
+        });
+      } else {
+        $('.conn-info-dd').hide();
+        $('.connection-data').css({pointerEvents: 'none', cursor: 'arrow'});
+      }
+    },
+
+    get_connection_data: function(event){
+      var index = $(event).attr('data-index');
+      var connection_details = this.connection_list[index];
+      if(connection_details.server_group) {
+        this.on_change_connection(connection_details);
+      } else {
+        this.on_new_connection();
+      }
+
     },
 
     reflectPreferences: function() {
@@ -200,7 +251,8 @@ define('tools.querytool', [
     },
 
     set_editor_title: function(title) {
-      this.$el.find('.editor-title').text(title);
+      this.$el.find('.editor-title').text(_.unescape(title));
+      this.render_connection(this.connection_list);
     },
 
     // This function is used to render the template.
@@ -251,7 +303,7 @@ define('tools.querytool', [
         isCloseable: false,
         isPrivate: true,
         extraClasses: 'hide-vertical-scrollbar',
-        content: '<div id ="datagrid" class="sql-editor-grid-container text-12" tabindex="0"></div>',
+        content: `<div id ="datagrid" class="sql-editor-grid-container text-12" tabindex="0">${EMPTY_DATA_OUTPUT_CONTENT}</div>`,
       });
 
       var explain = new pgAdmin.Browser.Panel({
@@ -261,7 +313,7 @@ define('tools.querytool', [
         height: '100%',
         isCloseable: false,
         isPrivate: true,
-        content: '<div class="sql-editor-explain" tabindex="0"></div>',
+        content: `<div class="sql-editor-explain pg-el-container" tabindex="0">${EMPTY_EXPLAIN_CONTENT}</div>`,
       });
 
       var messages = new pgAdmin.Browser.Panel({
@@ -684,6 +736,8 @@ define('tools.querytool', [
       pgBrowser.register_to_activity_listener(document, ()=>{
         alertify.alert(gettext('Timeout'), gettext('Your session has timed out due to inactivity. Please close the window and login again.'));
       });
+
+      self.render_connection(self.connection_list);
     },
 
     /* Regarding SlickGrid usage in render_grid function.
@@ -1595,6 +1649,17 @@ define('tools.querytool', [
       );
     },
 
+    on_new_connection: function() {
+      var self = this;
+
+      // Trigger the show_filter signal to the SqlEditorController class
+      self.handler.trigger(
+        'pgadmin-sqleditor:button:show_new_connection',
+        self,
+        self.handler
+      );
+    },
+
     // Callback function for include filter button click.
     on_include_filter: function(ev) {
       var self = this;
@@ -2038,7 +2103,129 @@ define('tools.querytool', [
 
       queryToolActions.executeRollback(this.handler);
     },
+
+    // Callback function for manage macros button click.
+    on_manage_macros: function() {
+      var self = this;
+
+      // Trigger the show_filter signal to the SqlEditorController class
+      self.handler.trigger(
+        'pgadmin-sqleditor:button:manage_macros',
+        self,
+        self.handler
+      );
+    },
+
+    // Callback function for manage macros button click.
+    on_execute_macro: function(e) {
+      let macroId = $(e.currentTarget).data('macro-id');
+      this.handler.history_query_source = QuerySources.EXECUTE;
+      queryToolActions.executeMacro(this.handler, macroId);
+    },
+
+    set_selected_option: function(selected_config) {
+      this.connection_list.forEach(option =>{
+        if(option['server'] == selected_config['server'] && option['database'] == selected_config['database']) {
+          selected_config['is_selected'] = true;
+        } else {
+          option['is_selected'] = false;
+        }
+      });
+    },
+
+    on_change_connection: function(connection_details, ref) {
+      if(!connection_details['is_selected']) {
+        var self = this;
+        var loadingDiv = null;
+        var msgDiv = null;
+        if(ref){
+          loadingDiv = $('#show_filter_progress');
+          loadingDiv.removeClass('d-none');
+          msgDiv = loadingDiv.find('.sql-editor-busy-text');
+          msgDiv.text('Connecting to database...');
+        } else{
+          loadingDiv = $('#fetching_data');
+          loadingDiv.removeClass('d-none');
+          msgDiv = loadingDiv.find('.sql-editor-busy-text');
+        }
+
+        alertify.confirm(gettext('Change connection'),
+          gettext('By changing the connection you will lose all your unsaved data for the current connection. <br> Do you want to continue?'),
+          function() {
+            self.set_selected_option(connection_details);
+            $.ajax({
+              url: url_for('datagrid.update_query_tool_connection', {
+                'trans_id': self.transId,
+                'sgid': connection_details['server_group'],
+                'sid': connection_details['server'],
+                'did': connection_details['database'],
+              }),
+              method: 'POST',
+              contentType: 'application/json',
+              data: JSON.stringify(connection_details),
+            })
+              .done(function(res) {
+                if(res.success) {
+                  self.transId = res.data.tran_id;
+                  self.handler.transId = res.data.tran_id;
+                  self.handler.url_params = {
+                    'did': connection_details['database'],
+                    'is_query_tool': self.handler.url_params.is_query_tool,
+                    'server_type': self.handler.url_params.server_type,
+                    'sgid': connection_details['server_group'],
+                    'sid': connection_details['server'],
+                    'title': connection_details['title'],
+                  };
+                  self.set_editor_title(_.unescape(self.handler.url_params.title));
+                  self.handler.setTitle(_.unescape(self.handler.url_params.title));
+                  let success_msg = connection_details['server_name'] + '/' + connection_details['database_name'] + '- Database connected';
+                  alertify.success(success_msg);
+                  if(ref){
+                    let connection_data = {
+                      'server_group': self.handler.url_params.sgid,
+                      'server': connection_details['server'],
+                      'database': connection_details['database'],
+                      'user': connection_details['user'],
+                      'title': connection_details['title'],
+                      'role': connection_details['role'],
+                      'is_allow_new_connection': true,
+                      'database_name': connection_details['database_name'],
+                      'server_name': connection_details['server_name'],
+                      'is_selected': true,
+                    };
+                    self.connection_list.unshift(connection_data);
+                    self.render_connection(self.connection_list);
+                    loadingDiv.addClass('d-none');
+                    alertify.newConnectionDialog().destroy();
+                    ref.close();
+                  } else {
+                    loadingDiv.addClass('d-none');
+                  }
+                }
+                return true;
+              })
+              .fail(function(xhr) {
+                if(xhr.status == 428) {
+                  alertify.connectServer('Connect to server', xhr.responseJSON.result, connection_details['server'], false);
+                } else {
+                  alertify.error(xhr.responseJSON['errormsg']);
+                }
+              });
+          },
+          function() {
+            loadingDiv.addClass('d-none');
+            alertify.newConnectionDialog().destroy();
+            return true;
+          }
+        ).set('labels', {
+          ok: gettext('Yes'),
+          cancel: gettext('No'),
+        });
+      }
+    },
   });
+
+
 
   /* Defining controller class for data grid, which actually
    * perform the operations like executing the sql query, poll the result,
@@ -2308,7 +2495,7 @@ define('tools.querytool', [
        * call the render method of the grid view to render the slickgrid
        * header and loading icon and start execution of the sql query.
        */
-      start: function(transId, url_params, layout) {
+      start: function(transId, url_params, layout, macros) {
         var self = this;
 
         self.is_query_tool = url_params.is_query_tool==='true'?true:false;
@@ -2333,6 +2520,7 @@ define('tools.querytool', [
           layout: layout,
         });
         self.transId = self.gridView.transId = transId;
+        self.macros = self.gridView.macros = macros;
 
         self.gridView.current_file = undefined;
 
@@ -2357,7 +2545,29 @@ define('tools.querytool', [
           });
 
           $('#btn-conn-status i').removeClass('obtaining-conn');
+
+          var tree_data = pgWindow.default.pgAdmin.Browser.treeMenu.translateTreeNodeIdFromACITree(pgWindow.default.pgAdmin.Browser.treeMenu.selected());
+
+          var server_data = pgWindow.default.pgAdmin.Browser.treeMenu.findNode(tree_data.slice(0,2));
+          var database_data = pgWindow.default.pgAdmin.Browser.treeMenu.findNode(tree_data.slice(0,4));
+
+
+
           self.gridView.set_editor_title(_.unescape(url_params.title));
+          let connection_data = {
+            'server_group': self.gridView.handler.url_params.sgid,
+            'server': self.gridView.handler.url_params.sid,
+            'database': self.gridView.handler.url_params.did,
+            'user': server_data.data.user.name,
+            'role': null,
+            'title': _.unescape(url_params.title),
+            'is_allow_new_connection': false,
+            'database_name': _.unescape(database_data.data.label),
+            'server_name': _.unescape(server_data.data.label),
+            'is_selected': true,
+          };
+          self.gridView.connection_list.unshift(connection_data);
+          self.gridView.render_connection(self.gridView.connection_list);
         };
 
         pgBrowser.Events.on('pgadmin:query_tool:connected:' + transId, afterConn);
@@ -2452,6 +2662,7 @@ define('tools.querytool', [
         self.on('pgadmin-sqleditor:button:save_file', self._save_file, self);
         self.on('pgadmin-sqleditor:button:deleterow', self._delete, self);
         self.on('pgadmin-sqleditor:button:show_filter', self._show_filter, self);
+        self.on('pgadmin-sqleditor:button:show_new_connection', self._show_new_connection, self);
         self.on('pgadmin-sqleditor:button:include_filter', self._include_filter, self);
         self.on('pgadmin-sqleditor:button:exclude_filter', self._exclude_filter, self);
         self.on('pgadmin-sqleditor:button:remove_filter', self._remove_filter, self);
@@ -2474,12 +2685,14 @@ define('tools.querytool', [
         self.on('pgadmin-sqleditor:unindent_selected_code', self._unindent_selected_code, self);
         // Format
         self.on('pgadmin-sqleditor:format_sql', self._format_sql, self);
+        self.on('pgadmin-sqleditor:button:manage_macros', self._manage_macros, self);
+        self.on('pgadmin-sqleditor:button:execute_macro', self._execute_macro, self);
 
         window.parent.$(window.parent.document).on('pgadmin-sqleditor:rows-copied', self._copied_in_other_session);
       },
 
       // Checks if there is any dirty data in the grid before executing a query
-      check_data_changes_to_execute_query: function(explain_prefix=null, shouldReconnect=false) {
+      check_data_changes_to_execute_query: function(explain_prefix=null, shouldReconnect=false, macroId=undefined) {
         var self = this;
 
         // Check if the data grid has any changes before running query
@@ -2492,7 +2705,10 @@ define('tools.querytool', [
             gettext('The data has been modified, but not saved. Are you sure you wish to discard the changes?'),
             function() {
               // The user does not want to save, just continue
-              if(self.is_query_tool) {
+              if (macroId !== undefined) {
+                self._execute_macro_query(explain_prefix, shouldReconnect, macroId);
+              }
+              else if(self.is_query_tool) {
                 self._execute_sql_query(explain_prefix, shouldReconnect);
               }
               else {
@@ -2508,7 +2724,10 @@ define('tools.querytool', [
             cancel: gettext('No'),
           });
         } else {
-          if(self.is_query_tool) {
+          if (macroId !== undefined) {
+            self._execute_macro_query(explain_prefix, shouldReconnect, macroId);
+          }
+          else if(self.is_query_tool) {
             self._execute_sql_query(explain_prefix, shouldReconnect);
           }
           else {
@@ -2602,6 +2821,38 @@ define('tools.querytool', [
           });
       },
 
+      // Executes sql query  for macroin the editor in Query Tool mode
+      _execute_macro_query: function(explain_prefix, shouldReconnect, macroId) {
+        var self = this;
+
+        self.has_more_rows = false;
+        self.fetching_rows = false;
+
+        $.ajax({
+          url: url_for('sqleditor.get_macro', {'macro_id': macroId, 'trans_id': self.transId}),
+          method: 'GET',
+          contentType: 'application/json',
+          dataType: 'json',
+        })
+          .done(function(res) {
+            if (res) {
+              // Replace the place holder
+              const regex = /\$SELECTION\$/gi;
+              let query =  res.sql.replace(regex, self.gridView.query_tool_obj.getSelection());
+
+              const executeQuery = new ExecuteQuery.ExecuteQuery(self, pgAdmin.Browser.UserManagement);
+              executeQuery.poll = pgBrowser.override_activity_event_decorator(executeQuery.poll).bind(executeQuery);
+              executeQuery.execute(query, explain_prefix, shouldReconnect);
+            } else {
+              // Let it be for now
+            }
+          })
+          .fail(function() {
+          /* failure should not be ignored */
+          });
+
+      },
+
       // Executes sql query in the editor in Query Tool mode
       _execute_sql_query: function(explain_prefix, shouldReconnect) {
         var self = this, sql = '';
@@ -2658,7 +2909,7 @@ define('tools.querytool', [
         self.changedModels = [];
         self.has_oids = data.has_oids;
         self.oids = data.oids;
-        $('.sql-editor-explain').empty();
+        $('.sql-editor-explain').html(EMPTY_EXPLAIN_CONTENT);
         self.explain_plan = false;
 
         /* If object don't have primary keys then set the
@@ -3622,7 +3873,6 @@ define('tools.querytool', [
           }
         };
       },
-
       // This function will show the filter in the text area.
       _show_filter: function() {
         let self = this,
@@ -3637,7 +3887,19 @@ define('tools.querytool', [
         }
         FilterHandler.dialog(self, reconnect);
       },
+      // This function will show the new connection.
+      _show_new_connection: function() {
+        let self = this,
+          reconnect = false;
 
+        /* When server is disconnected and connected, connection is lost,
+         * To reconnect pass true
+         */
+        if (arguments.length > 0 && arguments[arguments.length - 1] == 'connect') {
+          reconnect = true;
+        }
+        newConnectionHandler.dialog(self, reconnect, self.preferences);
+      },
       // This function will include the filter by selection.
       _include_filter: function() {
         var self = this,
@@ -3968,6 +4230,7 @@ define('tools.querytool', [
         $('#btn-file-menu-dropdown').prop('disabled', mode_disabled);
         $('#btn-find').prop('disabled', mode_disabled);
         $('#btn-find-menu-dropdown').prop('disabled', mode_disabled);
+        $('#btn-macro-dropdown').prop('disabled', mode_disabled);
 
         if (this.is_query_tool) {
 
@@ -4374,6 +4637,24 @@ define('tools.querytool', [
           /* failure should be ignored */
           });
       },
+
+      // This function will open the manage macro dialog
+      _manage_macros: function() {
+        let self = this;
+
+        /* When server is disconnected and connected, connection is lost,
+         * To reconnect pass true
+         */
+        MacroHandler.dialog(self);
+      },
+
+      // This function will open the manage macro dialog
+      _execute_macro: function() {
+
+        queryToolActions.executeMacro(this.handler);
+
+      },
+
 
       isQueryRunning: function() {
         return is_query_running;

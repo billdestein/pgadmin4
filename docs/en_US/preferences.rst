@@ -49,7 +49,7 @@ Use the fields on the *Display* panel to specify general display preferences:
   the client will display the animated dialogues/notifications otherwise it
   will be unanimated.
 
-* When the *Hide shared server?* switch is set to *True*, the client will hide
+* When the *Hide shared servers?* switch is set to *True*, the client will hide
   all the shared servers from the browser tree.
 
 * Use the *Lock layout* field to lock the UI layout at different levels. This
@@ -159,6 +159,8 @@ Expand the *Debugger* node to specify your debugger display preferences.
     :alt: Preferences dialog debugger display options
     :align: center
 
+* Use *Debugger tab title placeholder* field to customize the Debugger tab title.
+
 * When the *Open in new browser tab* switch is set to *True*, the Debugger will
   open in a new browser tab when invoked.
 
@@ -188,7 +190,7 @@ Expand the *Miscellaneous* node to specify miscellaneous display preferences.
 * Use the *Themes* drop-down listbox to select the theme for pgAdmin. You'll also get a preview just below the
   drop down. Note that, to apply the theme you need to refresh the pgAdmin page. You can also submit your
   own themes, check `here <https://git.postgresql.org/gitweb/?p=pgadmin4.git;a=blob_plain;f=README>`_ how.
-  Currently we support Standard, Dark and High Contrast (Beta) theme.
+  Currently we support Standard, Dark and High Contrast theme.
 
 The Paths Node
 **************
@@ -283,6 +285,10 @@ Tool display.
   will disable the notifier, and a value of 0 will display it until clicked. If
   a positive value above zero is specified, the notifier will be displayed for
   the specified number of seconds. The default is *5*.
+
+* Use the *Query tool tab title placeholder* field to customize the query tool tab title.
+
+* Use *View/Edit tab title placeholder* field to customize the View/Edit Data tab title.
 
 .. image:: images/preferences_sql_editor.png
     :alt: Preferences dialog sqleditor editor settings
@@ -415,6 +421,8 @@ Expand the *Schema Diff* node to specify your display preferences.
 .. image:: images/preferences_schema_diff.png
     :alt: Preferences schema diff
     :align: center
+
+Use the *Ignore owner* switch to ignores the owner while comparing the objects.
 
 Use the *Ignore whitespaces* switch to ignores the whitespaces while comparing
 the string objects. Whitespace includes space, tabs, and CRLF.

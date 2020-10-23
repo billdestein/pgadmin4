@@ -10,10 +10,8 @@
 """Schema diff object comparison."""
 
 from flask import render_template
-from flask_babelex import gettext
 from pgadmin.utils.driver import get_driver
 from config import PG_DEFAULT_DRIVER
-from pgadmin.utils.ajax import internal_server_error
 from pgadmin.tools.schema_diff.directory_compare import compare_dictionaries
 
 
@@ -60,7 +58,6 @@ class SchemaDiffObjectCompare:
                          'did': kwargs.get('target_did')}
 
         group_name = kwargs.get('group_name')
-        ignore_whitespaces = kwargs.get('ignore_whitespaces')
         source_schema_name = kwargs.get('source_schema_name', None)
         source = {}
         target = {}
@@ -91,7 +88,6 @@ class SchemaDiffObjectCompare:
                                     node=self.node_type,
                                     node_label=self.blueprint.collection_label,
                                     group_name=group_name,
-                                    ignore_whitespaces=ignore_whitespaces,
                                     ignore_keys=self.keys_to_ignore,
                                     source_schema_name=source_schema_name)
 

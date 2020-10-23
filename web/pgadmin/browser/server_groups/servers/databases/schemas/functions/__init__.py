@@ -1151,6 +1151,14 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
         else:
             object_type = 'function'
 
+            # We are showing trigger functions under the trigger node.
+            # It may possible that trigger is in one schema and trigger
+            # function is in another schema, so to show the SQL we need to
+            # change the schema id i.e scid.
+            if self.node_type == 'trigger_function' and \
+                    scid != resp_data['pronamespace']:
+                scid = resp_data['pronamespace']
+
             # Get Schema Name from its OID.
             self._get_schema_name_from_oid(resp_data)
 
@@ -1192,11 +1200,13 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
                 self.conn, resp_data['pronamespace'], resp_data['proname']),
             resp_data['proargtypenames'].lstrip('(').rstrip(')'))
 
+        pattern = '\n{2,}'
+        repl = '\n\n'
         if not json_resp:
-            return re.sub('\n{2,}', '\n\n', func_def)
+            return re.sub(pattern, repl, func_def)
 
         sql = sql_header + func_def
-        sql = re.sub('\n{2,}', '\n\n', sql)
+        sql = re.sub(pattern, repl, sql)
 
         return ajax_response(response=sql)
 
@@ -1219,15 +1229,14 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
         status, sql = self._get_sql(gid=gid, sid=sid, did=did, scid=scid,
                                     data=self.request, fnid=fnid)
 
-        if status:
-            sql = re.sub('\n{2,}', '\n\n', sql)
-            return make_json_response(
-                data=sql,
-                status=200
-            )
-        else:
-            sql = re.sub('\n{2,}', '\n\n', sql)
-            return sql
+        if not status:
+            return internal_server_error(errormsg=sql)
+
+        sql = re.sub('\n{2,}', '\n\n', sql)
+        return make_json_response(
+            data=sql,
+            status=200
+        )
 
     @staticmethod
     def _update_arguments_for_get_sql(data, old_data):
@@ -1359,7 +1368,7 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
         if not isinstance(old_data, dict):
             return False, gettext(
                 "Could not find the function in the database."
-            )
+            ), ''
 
         # Get Schema Name
         old_data['pronamespace'] = self._get_schema(
@@ -1423,7 +1432,7 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
             "/".join([self.sql_template_path, self._UPDATE_SQL]),
             data=data, o_data=old_data
         )
-        return sql
+        return True, '', sql
 
     def _get_sql(self, **kwargs):
         """
@@ -1447,12 +1456,11 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
         # Get Schema Name from its OID.
         self._get_schema_name_from_oid(data)
 
-        if 'provolatile' in data:
-            data['provolatile'] = vol_dict[data['provolatile']]\
-                if data['provolatile'] else ''
-
         if fnid is not None:
             # Edit Mode
+            if 'provolatile' in data:
+                data['provolatile'] = vol_dict[data['provolatile']] \
+                    if data['provolatile'] else ''
 
             all_ids_dict = {
                 'gid': gid,
@@ -1464,8 +1472,12 @@ class FunctionView(PGChildNodeView, DataTypeReader, SchemaDiffObjectCompare):
                 'is_sql': is_sql,
                 'is_schema_diff': is_schema_diff,
             }
-            sql = self._get_sql_for_edit_mode(data, parallel_dict,
-                                              all_ids_dict, vol_dict)
+            status, errmsg, sql = self._get_sql_for_edit_mode(
+                data, parallel_dict, all_ids_dict, vol_dict)
+
+            if not status:
+                return False, errmsg
+
         else:
             # Parse Privileges
             self._parse_privilege_data(data)

@@ -427,6 +427,7 @@ define([
               panel = pgBrowser.docker.addPanel(
                 'frm_debugger', wcDocker.DOCK.STACKED, dashboardPanel[0]
               );
+            debuggerUtils.setDebuggerTitle(panel, self.preferences, treeInfo.function.label, treeInfo.schema.label, treeInfo.database.label);
 
             panel.focus();
 
@@ -439,6 +440,21 @@ define([
                 url: closeUrl,
                 method: 'DELETE',
               });
+            });
+
+            // Panel Rename event
+            panel.on(wcDocker.EVENT.RENAME, function(panel_data) {
+              Alertify.prompt('', panel_data.$titleText[0].textContent,
+                // We will execute this function when user clicks on the OK button
+                function(evt, value) {
+                  if(value) {
+                    debuggerUtils.setDebuggerTitle(panel, self.preferences, treeInfo.function.label, treeInfo.schema.label, treeInfo.database.label, value);
+                  }
+                },
+                // We will execute this function when user clicks on the Cancel
+                // button.  Do nothing just close it.
+                function(evt) { evt.cancel = false; }
+              ).set({'title': gettext('Rename Panel')});
             });
           }
         })
@@ -549,6 +565,7 @@ define([
                     panel = pgBrowser.docker.addPanel(
                       'frm_debugger', wcDocker.DOCK.STACKED, dashboardPanel[0]
                     );
+                  debuggerUtils.setDebuggerTitle(panel, self.preferences, newTreeInfo.function.label, newTreeInfo.schema.label, newTreeInfo.database.label);
 
                   panel.focus();
 

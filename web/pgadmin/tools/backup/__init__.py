@@ -98,6 +98,7 @@ class BackupMessage(IProcessDesc):
         self.bfile = _bfile
         self.database = _kwargs['database'] if 'database' in _kwargs else None
         self.cmd = ''
+        self.args_str = "{0} ({1}:{2})"
 
         def cmd_arg(x):
             if x:
@@ -140,6 +141,11 @@ class BackupMessage(IProcessDesc):
             # It should never reach here.
             return _("Unknown Backup")
 
+    # @property
+    # def current_storage_dir(self):
+    #     return self.bfile if os.path.isdir(self.bfile) \
+    #         else os.path.dirname(self.bfile)
+
     @property
     def message(self):
         name, host, port = self.get_server_details()
@@ -151,22 +157,19 @@ class BackupMessage(IProcessDesc):
             return _(
                 "Backing up an object on the server '{0}' "
                 "from database '{1}'"
-            ).format(
-                "{0} ({1}:{2})".format(
-                    name, host, port
-                ),
-                html.safe_str(self.database)
-            )
+            ).format(self.args_str.format(name, host, port),
+                     html.safe_str(self.database)
+                     )
         if self.backup_type == BACKUP.GLOBALS:
             return _("Backing up the global objects on "
                      "the server '{0}'").format(
-                "{0} ({1}:{2})".format(
+                self.args_str.format(
                     name, host, port
                 )
             )
         elif self.backup_type == BACKUP.SERVER:
             return _("Backing up the server '{0}'").format(
-                "{0} ({1}:{2})".format(
+                self.args_str.format(
                     name, host, port
                 )
             )
@@ -184,7 +187,7 @@ class BackupMessage(IProcessDesc):
                 "Backing up an object on the server '{0}' "
                 "from database '{1}'..."
             ).format(
-                "{0} ({1}:{2})".format(
+                self.args_str.format(
                     name, host, port
                 ),
                 self.database
@@ -193,14 +196,14 @@ class BackupMessage(IProcessDesc):
         elif self.backup_type == BACKUP.GLOBALS:
             msg = _("Backing up the global objects on "
                     "the server '{0}'...").format(
-                "{0} ({1}:{2})".format(
+                self.args_str.format(
                     name, host, port
                 )
             )
             res += html.safe_str(msg)
         elif self.backup_type == BACKUP.SERVER:
             msg = _("Backing up the server '{0}'...").format(
-                "{0} ({1}:{2})".format(
+                self.args_str.format(
                     name, host, port
                 )
             )

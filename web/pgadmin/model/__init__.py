@@ -29,7 +29,7 @@ from flask_sqlalchemy import SQLAlchemy
 #
 ##########################################################################
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 ##########################################################################
 #
@@ -38,11 +38,12 @@ SCHEMA_VERSION = 26
 ##########################################################################
 
 db = SQLAlchemy()
+USER_ID = 'user.id'
 
 # Define models
 roles_users = db.Table(
     'roles_users',
-    db.Column('user_id', db.Integer(), db.ForeignKey('user.id')),
+    db.Column('user_id', db.Integer(), db.ForeignKey(USER_ID)),
     db.Column('role_id', db.Integer(), db.ForeignKey('role.id'))
 )
 
@@ -80,7 +81,7 @@ class User(db.Model, UserMixin):
 class Setting(db.Model):
     """Define a setting object"""
     __tablename__ = 'setting'
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey(USER_ID), primary_key=True)
     setting = db.Column(db.String(256), primary_key=True)
     value = db.Column(db.String(1024))
 
@@ -89,10 +90,19 @@ class ServerGroup(db.Model):
     """Define a server group for the treeview"""
     __tablename__ = 'servergroup'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey(USER_ID), nullable=False)
 
     name = db.Column(db.String(128), nullable=False)
     __table_args__ = (db.UniqueConstraint('user_id', 'name'),)
+
+    @property
+    def serialize(self):
+        """Return object data in easily serializable format"""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'name': self.name,
+        }
 
 
 class Server(db.Model):
@@ -101,7 +111,7 @@ class Server(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(
         db.Integer,
-        db.ForeignKey('user.id'),
+        db.ForeignKey(USER_ID),
         nullable=False
     )
     servergroup_id = db.Column(
@@ -175,6 +185,44 @@ class Server(db.Model):
     tunnel_password = db.Column(db.String(64), nullable=True)
     shared = db.Column(db.Boolean(), nullable=False)
 
+    @property
+    def serialize(self):
+        """Return object data in easily serializable format"""
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "servergroup_id": self.servergroup_id,
+            "name": self.name,
+            "host": self.host,
+            "hostaddr": self.hostaddr,
+            "port": self.port,
+            "maintenance_db": self.maintenance_db,
+            "username": self.username,
+            "password": self.password,
+            "save_password": self.save_password,
+            "role": self.role,
+            "ssl_mode": self.ssl_mode,
+            "comment": self.comment,
+            "discovery_id": self.discovery_id,
+            "db_res": self.db_res,
+            "passfile": self.passfile,
+            "sslcert": self.sslcert,
+            "sslkey": self.sslkey,
+            "sslrootcert": self.sslrootcert,
+            "sslcrl": self.sslcrl,
+            "sslcompression": self.sslcompression,
+            "bgcolor": self.bgcolor,
+            "fgcolor": self.fgcolor,
+            "service": self.service,
+            "connect_timeout": self.connect_timeout,
+            "use_ssh_tunnel": self.use_ssh_tunnel,
+            "tunnel_host": self.tunnel_host,
+            "tunnel_port": self.tunnel_port,
+            "tunnel_authentication": self.tunnel_authentication,
+            "tunnel_identity_file": self.tunnel_identity_file,
+            "tunnel_password": self.tunnel_password
+        }
+
 
 class ModulePreference(db.Model):
     """Define a preferences table for any modules."""
@@ -214,7 +262,7 @@ class UserPreference(db.Model):
         db.Integer, db.ForeignKey('preferences.id'), primary_key=True
     )
     uid = db.Column(
-        db.Integer, db.ForeignKey('user.id'), primary_key=True
+        db.Integer, db.ForeignKey(USER_ID), primary_key=True
     )
     value = db.Column(db.String(1024), nullable=False)
 
@@ -256,7 +304,7 @@ class Process(db.Model):
     pid = db.Column(db.String(), nullable=False, primary_key=True)
     user_id = db.Column(
         db.Integer,
-        db.ForeignKey('user.id'),
+        db.ForeignKey(USER_ID),
         nullable=False
     )
     command = db.Column(db.String(), nullable=False)
@@ -283,7 +331,7 @@ class QueryHistoryModel(db.Model):
     __tablename__ = 'query_history'
     srno = db.Column(db.Integer(), nullable=False, primary_key=True)
     uid = db.Column(
-        db.Integer, db.ForeignKey('user.id'), nullable=False, primary_key=True
+        db.Integer, db.ForeignKey(USER_ID), nullable=False, primary_key=True
     )
     sid = db.Column(
         db.Integer(), db.ForeignKey('server.id'), nullable=False,
@@ -315,7 +363,7 @@ class SharedServer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(
         db.Integer,
-        db.ForeignKey('user.id')
+        db.ForeignKey(USER_ID)
     )
     server_owner = db.Column(
         db.String(128),
@@ -391,3 +439,26 @@ class SharedServer(db.Model):
     tunnel_identity_file = db.Column(db.String(64), nullable=True)
     tunnel_password = db.Column(db.String(64), nullable=True)
     shared = db.Column(db.Boolean(), nullable=False)
+
+
+class Macros(db.Model):
+    """Define a particular macro."""
+    __tablename__ = 'macros'
+    id = db.Column(db.Integer, primary_key=True)
+    alt = db.Column(db.Boolean(), nullable=False)
+    control = db.Column(db.Boolean(), nullable=False)
+    key = db.Column(db.String(32), nullable=False)
+    key_code = db.Column(db.Integer, nullable=False)
+
+
+class UserMacros(db.Model):
+    """Define the macro for a particular user."""
+    __tablename__ = 'user_macros'
+    mid = db.Column(
+        db.Integer, db.ForeignKey('macros.id'), primary_key=True
+    )
+    uid = db.Column(
+        db.Integer, db.ForeignKey(USER_ID), primary_key=True
+    )
+    name = db.Column(db.String(1024), nullable=False)
+    sql = db.Column(db.Text(), nullable=False)

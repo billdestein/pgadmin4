@@ -21,7 +21,7 @@ import psycopg2
 from flask import g, current_app
 from flask_babelex import gettext
 from flask_security import current_user
-from pgadmin.utils.crypto import decrypt
+from pgadmin.utils.crypto import decrypt, encrypt
 from psycopg2.extensions import encodings
 
 import config
@@ -140,6 +140,10 @@ class Connection(BaseConnection):
       - This function will return the encrypted password for database server
       - greater than or equal to 10.
     """
+    UNAUTHORIZED_REQUEST = gettext("Unauthorized request.")
+    CURSOR_NOT_FOUND = \
+        gettext("Cursor could not be found for the async connection.")
+    ARGS_STR = "{0}#{1}"
 
     def __init__(self, manager, conn_id, db, auto_reconnect=True, async_=0,
                  use_binary_placeholder=False, array_to_string=False):
@@ -200,6 +204,45 @@ class Connection(BaseConnection):
     def __str__(self):
         return self.__repr__()
 
+    def _check_user_password(self, kwargs):
+        """
+        Check user and password.
+        """
+        password = None
+        encpass = None
+        is_update_password = True
+
+        if 'user' in kwargs and kwargs['password']:
+            password = kwargs['password']
+            kwargs.pop('password')
+            is_update_password = False
+        else:
+            encpass = kwargs['password'] if 'password' in kwargs else None
+
+        return password, encpass, is_update_password
+
+    def _decode_password(self, encpass, manager, password, crypt_key):
+        if encpass:
+            # Fetch Logged in User Details.
+            user = User.query.filter_by(id=current_user.id).first()
+
+            if user is None:
+                return True, self.UNAUTHORIZED_REQUEST, password
+
+            try:
+                password = decrypt(encpass, crypt_key)
+                # password is in bytes, for python3 we need it in string
+                if isinstance(password, bytes):
+                    password = password.decode()
+            except Exception as e:
+                manager.stop_ssh_tunnel()
+                current_app.logger.exception(e)
+                return True, \
+                    _(
+                        "Failed to decrypt the saved password.\nError: {0}"
+                    ).format(str(e))
+        return False, '', password
+
     def connect(self, **kwargs):
         if self.conn:
             if self.conn.closed:
@@ -208,11 +251,13 @@ class Connection(BaseConnection):
                 return True, None
 
         pg_conn = None
-        password = None
         passfile = None
         manager = self.manager
+        crypt_key_present, crypt_key = get_crypt_key()
 
-        encpass = kwargs['password'] if 'password' in kwargs else None
+        password, encpass, is_update_password = self._check_user_password(
+            kwargs)
+
         passfile = kwargs['passfile'] if 'passfile' in kwargs else None
         tunnel_password = kwargs['tunnel_password'] if 'tunnel_password' in \
                                                        kwargs else ''
@@ -227,38 +272,23 @@ class Connection(BaseConnection):
         if manager.use_ssh_tunnel == 1:
             manager.check_ssh_tunnel_alive()
 
-        if encpass is None:
-            encpass = self.password or getattr(manager, 'password', None)
+        if is_update_password:
+            if encpass is None:
+                encpass = self.password or getattr(manager, 'password', None)
 
-        self.password = encpass
+            self.password = encpass
 
         # Reset the existing connection password
         if self.reconnecting is not False:
             self.password = None
 
-        crypt_key_present, crypt_key = get_crypt_key()
         if not crypt_key_present:
             raise CryptKeyMissing()
 
-        if encpass:
-            # Fetch Logged in User Details.
-            user = User.query.filter_by(id=current_user.id).first()
-
-            if user is None:
-                return False, gettext("Unauthorized request.")
-
-            try:
-                password = decrypt(encpass, crypt_key)
-                # password is in bytes, for python3 we need it in string
-                if isinstance(password, bytes):
-                    password = password.decode()
-            except Exception as e:
-                manager.stop_ssh_tunnel()
-                current_app.logger.exception(e)
-                return False, \
-                    _(
-                        "Failed to decrypt the saved password.\nError: {0}"
-                    ).format(str(e))
+        is_error, errmsg, password = self._decode_password(encpass, manager,
+                                                           password, crypt_key)
+        if is_error:
+            return False, errmsg
 
         # If no password credential is found then connect request might
         # come from Query tool, ViewData grid, debugger etc tools.
@@ -269,7 +299,10 @@ class Connection(BaseConnection):
 
         try:
             database = self.db
-            user = manager.user
+            if 'user' in kwargs and kwargs['user']:
+                user = kwargs['user']
+            else:
+                user = manager.user
             conn_id = self.conn_id
 
             import os
@@ -338,10 +371,10 @@ class Connection(BaseConnection):
                 self.wasConnected = False
             raise e
 
-        if status:
+        if status and is_update_password:
             manager._update_password(encpass)
         else:
-            if not self.reconnecting:
+            if not self.reconnecting and is_update_password:
                 self.wasConnected = False
 
         return status, msg
@@ -359,7 +392,7 @@ class Connection(BaseConnection):
             else:
                 self.conn.autocommit = True
 
-    def _set_role(self, manager, cur, conn_id):
+    def _set_role(self, manager, cur, conn_id, **kwargs):
         """
         Set role
         :param manager:
@@ -367,8 +400,18 @@ class Connection(BaseConnection):
         :param conn_id:
         :return:
         """
-        if manager.role:
-            status = self._execute(cur, "SET ROLE TO %s", [manager.role])
+        is_set_role = False
+        role = None
+
+        if 'role' in kwargs and kwargs['role']:
+            is_set_role = True
+            role = kwargs['role']
+        elif manager.role:
+            is_set_role = True
+            role = manager.role
+
+        if is_set_role:
+            status = self._execute(cur, "SET ROLE TO %s", [role])
 
             if status is not None:
                 self.conn.close()
@@ -382,7 +425,7 @@ class Connection(BaseConnection):
                         msg=status
                     )
                 )
-                return False, \
+                return True, \
                     _(
                         "Failed to setup the role with error message:\n{0}"
                     ).format(status)
@@ -401,7 +444,7 @@ class Connection(BaseConnection):
         self.execution_aborted = False
         self.__backend_pid = self.conn.get_backend_pid()
 
-        setattr(g, "{0}#{1}".format(
+        setattr(g, self.ARGS_STR.format(
             self.manager.sid,
             self.conn_id.encode('utf-8')
         ), None)
@@ -445,7 +488,7 @@ class Connection(BaseConnection):
 
             return False, status
 
-        is_error, errmsg = self._set_role(manager, cur, conn_id)
+        is_error, errmsg = self._set_role(manager, cur, conn_id, **kwargs)
         if is_error:
             return False, errmsg
 
@@ -491,7 +534,7 @@ WHERE db.datname = current_database()""")
                 if len(manager.db_info) == 1:
                     manager.did = res['did']
 
-        self._set_user_info(cur, manager)
+        self._set_user_info(cur, manager, **kwargs)
 
         self._set_server_type_and_password(kwargs, manager)
 
@@ -499,7 +542,7 @@ WHERE db.datname = current_database()""")
 
         return True, None
 
-    def _set_user_info(self, cur, manager):
+    def _set_user_info(self, cur, manager, **kwargs):
         """
         Set user info.
         :param cur:
@@ -517,7 +560,7 @@ WHERE db.datname = current_database()""")
         WHERE
             rolname = current_user""")
 
-        if status is None:
+        if status is None and 'user' not in kwargs:
             manager.user_info = dict()
             if cur.rowcount > 0:
                 manager.user_info = cur.fetchmany(1)[0]
@@ -563,7 +606,7 @@ WHERE db.datname = current_database()""")
                 self.db,
                 None if self.conn_id[0:3] == 'DB:' else self.conn_id[5:]
             )
-        cur = getattr(g, "{0}#{1}".format(
+        cur = getattr(g, self.ARGS_STR.format(
             self.manager.sid,
             self.conn_id.encode('utf-8')
         ), None)
@@ -635,7 +678,7 @@ WHERE db.datname = current_database()""")
                     )
 
         setattr(
-            g, "{0}#{1}".format(
+            g, self.ARGS_STR.format(
                 self.manager.sid, self.conn_id.encode('utf-8')
             ), cur
         )
@@ -1031,7 +1074,7 @@ WHERE db.datname = current_database()""")
 
     def __attempt_execution_reconnect(self, fn, *args, **kwargs):
         self.reconnecting = True
-        setattr(g, "{0}#{1}".format(
+        setattr(g, self.ARGS_STR.format(
             self.manager.sid,
             self.conn_id.encode('utf-8')
         ), None)
@@ -1187,9 +1230,7 @@ WHERE db.datname = current_database()""")
         """
         cur = self.__async_cursor
         if not cur:
-            return False, gettext(
-                "Cursor could not be found for the async connection."
-            )
+            return False, self.CURSOR_NOT_FOUND
 
         if self.conn.isexecuting():
             return False, gettext(
@@ -1242,7 +1283,7 @@ WHERE db.datname = current_database()""")
             user = User.query.filter_by(id=current_user.id).first()
 
             if user is None:
-                return False, gettext("Unauthorized request."), password
+                return False, self.UNAUTHORIZED_REQUEST, password
 
             crypt_key_present, crypt_key = get_crypt_key()
             if not crypt_key_present:
@@ -1404,9 +1445,7 @@ Failed to reset the connection to the server due to following error:
 
         cur = self.__async_cursor
         if not cur:
-            return False, gettext(
-                "Cursor could not be found for the async connection."
-            )
+            return False, self.CURSOR_NOT_FOUND
 
         current_app.logger.log(
             25,
@@ -1505,9 +1544,7 @@ Failed to reset the connection to the server due to following error:
         """
         cur = self.__async_cursor
         if not cur:
-            return gettext(
-                "Cursor could not be found for the async connection."
-            )
+            return self.CURSOR_NOT_FOUND
 
         current_app.logger.log(
             25,
@@ -1559,7 +1596,7 @@ Failed to reset the connection to the server due to following error:
                 # Fetch Logged in User Details.
                 user = User.query.filter_by(id=current_user.id).first()
                 if user is None:
-                    return False, gettext("Unauthorized request.")
+                    return False, self.UNAUTHORIZED_REQUEST
 
                 crypt_key_present, crypt_key = get_crypt_key()
                 if not crypt_key_present:

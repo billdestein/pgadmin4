@@ -58,7 +58,7 @@ define('pgadmin.node.server', [
       label: gettext('Server'),
       canDrop: function(node){
         var serverOwner = node.user_id;
-        if (serverOwner != current_user.id)
+        if (serverOwner != current_user.id && !_.isUndefined(serverOwner))
           return false;
         return true;
       },
@@ -269,7 +269,10 @@ define('pgadmin.node.server', [
                 gettext('Are you sure you want to disconnect the server %s?', d.label),
                 function() { disconnect(); },
                 function() { return true;}
-              );
+              ).set('labels', {
+                ok: gettext('Ok'),
+                cancel: gettext('Cancel'),
+              });
             } else {
               disconnect();
             }
@@ -752,6 +755,11 @@ define('pgadmin.node.server', [
         },
         schema: [{
           id: 'id', label: gettext('ID'), type: 'int', mode: ['properties'],
+          visible: function(model){
+            if (model.attributes.user_id != current_user.id && pgAdmin.server_mode == 'True')
+              return false;
+            return true;
+          },
         },{
           id: 'name', label: gettext('Name'), type: 'text',
           mode: ['properties', 'edit', 'create'], disabled: 'isShared',
@@ -759,10 +767,18 @@ define('pgadmin.node.server', [
         {
           id: 'gid', label: gettext('Server group'), type: 'int',
           control: 'node-list-by-id', node: 'server_group',
-          mode: ['create', 'edit'], select2: {allowClear: false}, visible: 'isVisible',
+          mode: ['create', 'edit'], select2: {allowClear: false}, disabled: 'isShared',
         },
         {
           id: 'server_owner', label: gettext('Shared Server Owner'), type: 'text', mode: ['properties'],
+          visible:function(model){
+            var serverOwner = model.attributes.user_id;
+            if (model.attributes.shared && serverOwner != current_user.id && pgAdmin.server_mode == 'True'){
+              return true;
+            }
+            return false;
+
+          },
         },
         {
           id: 'server_type', label: gettext('Server type'), type: 'options',
@@ -787,7 +803,7 @@ define('pgadmin.node.server', [
           id: 'connect_now', controlLabel: gettext('Connect now?'), type: 'checkbox',
           group: null, mode: ['create'],
         },{
-          id: 'shared', label: gettext('Shared with all?'), type: 'switch',
+          id: 'shared', label: gettext('Shared?'), type: 'switch',
           mode: ['properties', 'create', 'edit'], 'options': {'size': 'mini'},
           readonly: function(model){
             var serverOwner = model.attributes.user_id;
@@ -1208,7 +1224,7 @@ define('pgadmin.node.server', [
       $.get(server_url)
         .done(function(res) {
           if (res.shared && _.isNull(res.username) && data.user_id != current_user.id){
-            if (selectedTreeNodeData._type == 'server'){
+            if (selectedTreeNodeData._type == 'server' && !res.service){
               pgAdmin.Browser.Node.callbacks.show_obj_properties.call(
                 pgAdmin.Browser.Nodes[tree.itemData(item)._type], {action: 'edit'}
               );
@@ -1239,7 +1255,7 @@ define('pgadmin.node.server', [
           // Let's not change the status of the tree node now.
           if (!_wasConnected) {
             tree.setInode(_item);
-            if (data.shared && pgAdmin.server_mode == 'True'){
+            if (_data.shared && pgAdmin.server_mode == 'True'){
               tree.addIcon(_item, {icon: 'icon-shared-server-not-connected'});
             }else{
               tree.addIcon(_item, {icon: 'icon-server-not-connected'});
