@@ -35,8 +35,8 @@ func (this Builder) build() {
   runtimeDir := path.Join(repoDir, "runtime")
   currentUser, _ := user.Current();
   homeDir := currentUser.HomeDir    
-  tarballDir := path.Join(homeDir, ".toolbox-tarballs")
-  tarballFilepath := path.Join(tarballDir, "pgadmin4.tgz")
+  tarballDir := path.Join(homeDir, "toolbox-tarballs")
+  tarballFilepath := path.Join(tarballDir, "toolbox-pgadmin4.tgz")
   
   // Find the python executable
   pythonFilepath, err := exec.LookPath("python")
@@ -131,7 +131,7 @@ func (this Builder) build() {
 
   // Tar the pgadmin directory
   parentDir := filepath.Dir(repoDir)
-  command = fmt.Sprintf("tar -C  %s -czf %s %s", parentDir, tarballFilepath, repoDir)
+  command = fmt.Sprintf("tar -C  %s -czf %s toolbox-pgadmin4", parentDir, tarballFilepath)
   fmt.Printf("command: '%s'\n", command)
   _, err = exec.Command("bash", "-c", command).Output()
   if err != nil {
