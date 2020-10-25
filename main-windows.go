@@ -27,10 +27,10 @@ import (
   "fmt"
   "os"
   "os/exec"
+  "os/user"
   "path"
   "path/filepath"
 )
-//  "os/user"
 
 type Builder struct {
 }
@@ -38,45 +38,54 @@ type Builder struct {
 func (this Builder) build() {
   repoDir, _ :=  filepath.Abs(filepath.Dir(os.Args[0]))
   runtimeDir := path.Join(repoDir, "runtime")
-  // currentUser, _ := user.Current();
-  // homeDir := currentUser.HomeDir    
-  // tarballDir := path.Join(homeDir, "toolbox-tarballs")
-  // tarballFilepath := path.Join(tarballDir, "toolbox-pgadmin4.tgz")
+  webDir := path.Join(repoDir, "web")
+  currentUser, _ := user.Current();
+  homeDir := currentUser.HomeDir    
+  tarballDir := path.Join(homeDir, "toolbox-tarballs")
+  tarballFilepath := path.Join(tarballDir, "toolbox-pgadmin4.tgz")
 
   // Find the qmake executable
-  qmakeFilepath, err := exec.LookPath("qmake")
+  qmakeExecutable, err := exec.LookPath("qmake")
   if err != nil {
     fmt.Printf("Could not find qmake executable. %s\n", err.Error())
     os.Exit(1);
   }
-  fmt.Printf("using qmake: '%s'\n", qmakeFilepath);
+  fmt.Printf("using qmake: '%s'\n", qmakeExecutable);
 
   // Find the python executable
-  pythonFilepath, err := exec.LookPath("python")
+  pythonExecutable, err := exec.LookPath("python")
   if err != nil {
     fmt.Printf("Could not find python executable. %s\n", err.Error())
     os.Exit(1);
   }
-  fmt.Printf("using python: '%s'\n", pythonFilepath);
+  fmt.Printf("using python: '%s'\n", pythonExecutable);
 
   // Find the yarn executable
-  yarnFilepath, err := exec.LookPath("yarn")
+  yarnExecutable, err := exec.LookPath("yarn")
   if err != nil {
     fmt.Printf("Could not find yarn executable. %s\n", err.Error())
     os.Exit(1);
   }
-  fmt.Printf("using yarn: '%s'\n", yarnFilepath);
+  fmt.Printf("using yarn: '%s'\n", yarnExecutable);
+
+  // Find the tar executable
+  tarExecutable, err := exec.LookPath("tar")
+  if err != nil {
+    fmt.Printf("Could not find tar executable. %s\n", err.Error())
+    os.Exit(1);
+  }
+  fmt.Printf("using tar: '%s'\n", tarExecutable);
 
   // Go to the runtime directory
   os.Chdir(runtimeDir)
   
   // The PgAdmin process needs to know where to find Python
-  pythonDir := filepath.Dir(pythonFilepath)
+  pythonDir := filepath.Dir(pythonExecutable)
   fmt.Printf("setting PGADMIN_PYTHON_DIR to %s\n", pythonDir)
   os.Setenv("PGADMIN_PYTHON_DIR", pythonDir)
 
-  // qmake
-  command := exec.Command(qmakeFilepath)
+  // Exec 'qmake'
+  command := exec.Command(qmakeExecutable)
   fmt.Printf("command: %s\n", command.String());
   output, err := command.CombinedOutput();
   if err != nil {
@@ -84,27 +93,62 @@ func (this Builder) build() {
     os.Exit(1)
   }
 
-  // Exec 'qmake'
-  // command = fmt.Sprintf("%s", qmakeFilepath)
-  // fmt.Printf("command: '%s'\n", command)
-  // os.Chdir(runtimeDir)
-  // output, err = exec.Command("bash", "-c", command).Output()
-  // os.Chdir(repoDir)
-  // if err != nil {
-  //   fmt.Printf("Failed to execute command '%s'. %s %s\n", command, output, err.Error())
-  //   os.Exit(1)
-  // }
+  // Exec 'qmake CONFIG+=release'
+  command = exec.Command(qmakeExecutable, "CONFIG+=release")
+  fmt.Printf("command: %s\n", command.String());
+  output, err = command.CombinedOutput();
+  if err != nil {
+    fmt.Printf("error running command '%s' '%s'. %s\n", command.String(), output, err.Error())
+    os.Exit(1)
+  }
+  
+  // Go to the web directory
+  os.Chdir(webDir)
+  
+  // Exec 'yarn install'
+  command = exec.Command(yarnExecutable, "install")
+  fmt.Printf("command: %s\n", command.String());
+  output, err = command.CombinedOutput();
+  if err != nil {
+    fmt.Printf("error running command '%s' '%s'. %s\n", command.String(), output, err.Error())
+    os.Exit(1)
+  }
+  
+  // Exec 'yarn run bundle'
+  command = exec.Command(yarnExecutable, "run", "bundle")
+  fmt.Printf("command: %s\n", command.String());
+  output, err = command.CombinedOutput();
+  if err != nil {
+    fmt.Printf("error running command '%s' '%s'. %s\n", command.String(), output, err.Error())
+    os.Exit(1)
+  }
+  
+  // Create the tarball directory if it does not exist
+  _, err = os.Stat(tarballDir)
+  if os.IsNotExist(err) {
+    os.MkdirAll(tarballDir, 0700)
+  }
 
-  // // Exec 'qmake CONFIG+=release'
-  // command = fmt.Sprintf("%s CONFIG+=release", qmakeFilepath)
-  // fmt.Printf("command: '%s'\n", command)
-  // os.Chdir(runtimeDir)
-  // output, err = exec.Command("bash", "-c", command).Output()
-  // os.Chdir(repoDir)
-  // if err != nil {
-  //   fmt.Printf("Failed to execute command '%s'. %s %s\n", command, output, err.Error())
-  //   os.Exit(1)
-  // }
+  // If the tarball exists, remove it
+  _, err = os.Stat(tarballFilepath)
+  if !os.IsNotExist(err) {
+    os.RemoveAll(tarballFilepath)
+    if err != nil {
+      fmt.Printf("Error removing tarball. %s\n", err.Error())
+      os.Exit(1)
+    }
+  }
+
+  // Exec 'tar;
+  parentDir := filepath.Dir(repoDir)
+  command = exec.Command(tarExecutable, "-C", parentDir, "-czf", tarballFilepath, "toolbox-pgadmin4")
+  fmt.Printf("command: %s\n", command.String());
+  output, err = command.CombinedOutput();
+  if err != nil {
+    fmt.Printf("error running command '%s' '%s'. %s\n", command.String(), output, err.Error())
+    os.Exit(1)
+  }
+
 
   // // Build the web assets
   // webDir := path.Join(repoDir, "web")
