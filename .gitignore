@@ -53,4 +53,5 @@ auditpy.txt
 .scannerwork/
 web/coverage/
 
-main
+main-windows.exe
+main-darwin.exe
