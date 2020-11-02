@@ -25,6 +25,7 @@ import (
   "os/user"
   "path"
   "path/filepath"
+  "runtime"
 )
 
 type Builder struct {
@@ -36,7 +37,13 @@ func (this Builder) build() {
   currentUser, _ := user.Current();
   homeDir := currentUser.HomeDir    
   tarballDir := path.Join(homeDir, "toolbox-tarballs")
-  tarballFilepath := path.Join(tarballDir, "toolbox-pgadmin4.tgz")
+  tarballFilepath := ""
+
+  if runtime.GOOS == "darwin" {
+    tarballFilepath = path.Join(tarballDir, "toolbox-pgadmin4-darwin.tgz")
+  } else {
+    tarballFilepath = path.Join(tarballDir, "toolbox-pgadmin4-windows.tgz")
+  }
   
   // Find the python executable
   pythonFilepath, err := exec.LookPath("python")
