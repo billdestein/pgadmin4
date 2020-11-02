@@ -37,13 +37,7 @@ func (this Builder) build() {
   currentUser, _ := user.Current();
   homeDir := currentUser.HomeDir    
   tarballDir := path.Join(homeDir, "toolbox-tarballs")
-  tarballFilepath := ""
-
-  if runtime.GOOS == "darwin" {
-    tarballFilepath = path.Join(tarballDir, "toolbox-pgadmin4-darwin.tgz")
-  } else {
-    tarballFilepath = path.Join(tarballDir, "toolbox-pgadmin4-windows.tgz")
-  }
+  tarballFilepath := path.Join(tarballDir, "toolbox-pgadmin4-darwin.tgz")
   
   // Find the python executable
   pythonFilepath, err := exec.LookPath("python")
